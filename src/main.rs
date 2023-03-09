@@ -159,7 +159,7 @@ fn main() -> anyhow::Result<()> {
         .build()
         .unwrap()
         .block_on(staff(
-            matches.get_one::<&String>("API_KEY").unwrap(),
+            matches.get_one::<String>("API_KEY").unwrap(),
             matches
                 .get_one("server")
                 .map(|s: &String| s.to_string())

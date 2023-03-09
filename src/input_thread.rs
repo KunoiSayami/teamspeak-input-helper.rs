@@ -27,6 +27,7 @@ mod inner {
                 .ok()
         }
 
+        // Known issue, may override C-c function after program exit
         pub fn get_input(sender: mpsc::Sender<DataType>) -> anyhow::Result<()> {
             let mut rl = DefaultEditor::new()?;
 
@@ -41,6 +42,7 @@ mod inner {
                     }
                     Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
                         Self::send_data(sender, DataType::Terminate);
+                        trace!("Send exit signal");
                         break;
                     }
                     Err(e) => return Err(anyhow!("Got error while read line: {:?}", e)),

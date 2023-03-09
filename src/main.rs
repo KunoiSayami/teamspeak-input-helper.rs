@@ -1,10 +1,11 @@
 #![feature(is_some_and, result_flattening)]
 
-use crate::datastructures::{FromQueryString, NotifyTextMessage, SocketConn};
+use crate::datastructures::{FromQueryString, NotifyTextMessage};
 use crate::input_thread::{DataType, InputThread};
+use crate::tslib::TeamspeakConnection;
 use anyhow::anyhow;
 use clap::{arg, command};
-use log::{error, info, warn};
+use log::{error, info, warn, LevelFilter};
 use std::hint::unreachable_unchecked;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -13,9 +14,12 @@ use tokio::time::Duration;
 
 mod datastructures;
 mod input_thread;
+mod tslib;
+
+const DEFAULT_VARIABLE_NAME: &str = "TS_CLIENT_QUERY_APIKEY";
 
 async fn real_staff(
-    mut conn: SocketConn,
+    mut conn: TeamspeakConnection,
     alt_signal: Arc<AtomicBool>,
     mut input_receiver: mpsc::Receiver<DataType>,
 ) -> anyhow::Result<()> {
@@ -32,7 +36,15 @@ async fn real_staff(
                         chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
                         &s
                     );*/
-                    conn.send_channel_message(&s)
+
+                    let server_id = conn
+                        .get_current_server_tab()
+                        .await
+                        .map_err(|e| warn!("Can't get current server tab: {:?}", e))
+                        .map(|r| r.schandler_id())
+                        .ok()
+                        .unwrap_or(1);
+                    conn.send_channel_message(server_id, &s)
                         .await
                         .map_err(|e| error!("Unable send channel message: {:?}", e))
                         .ok();
@@ -76,26 +88,19 @@ async fn real_staff(
             }
 
             if line.contains("notifytextmessage") {
-                let current_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
                 let view = NotifyTextMessage::from_query(line)
                     .map_err(|e| anyhow!("Got error while deserialize moved view: {:?}", e))?;
 
-                /*writer
-                .write_all(
-                    .as_bytes(),
-                )
-                .map_err(|e| anyhow!("Unable write to console: {:?}", e))?;*/
-
                 println!(
                     "[{time}] {sender}: {msg}",
-                    time = current_time,
+                    time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
                     sender = view.invoker_name(),
                     msg = view.msg()
                 );
                 continue;
             }
 
-            if line.contains("schandlerid=") {
+            if line.contains("clid=") && line.contains("cid=") {
                 received = true;
             }
         }
@@ -103,15 +108,15 @@ async fn real_staff(
 }
 
 async fn staff(
-    api_key: &str,
+    api_key: String,
     server: String,
     port: u16,
     input_receiver: mpsc::Receiver<DataType>,
 ) -> anyhow::Result<()> {
-    let mut conn = SocketConn::connect(&server, port)
+    let mut conn = TeamspeakConnection::connect(&server, port)
         .await
         .map_err(|e| anyhow!("Connect error: {:?}", e))?;
-    conn.login(api_key).await?;
+    conn.login(&api_key).await?;
     conn.register_event().await?;
 
     let keepalive_signal = Arc::new(AtomicBool::new(false));
@@ -132,8 +137,6 @@ async fn staff(
         } => {}
         ret = real_staff(conn, alt_signal, input_receiver) => {
             ret?;
-            // We really need this?
-            std::process::exit(0);
         }
     }
 
@@ -143,13 +146,23 @@ async fn staff(
 fn main() -> anyhow::Result<()> {
     let matches = command!()
         .args(&[
-            arg!([API_KEY] "Teamspeak client query api key"),
+            arg!(<API_KEY> "Teamspeak client query api key (env: TS_CLIENT_QUERY_APIKEY)"),
             arg!(--server <SERVER> "Specify server"),
             arg!(--port <PORT> "Specify port"),
+            arg!(--dbginput "Debug input function"),
+            arg!(--debug "Enable other module log output in debug/trace level"),
         ])
         .get_matches();
 
-    env_logger::Builder::from_default_env().init();
+    let mut logger_ = env_logger::Builder::from_default_env();
+    if !matches.get_flag("dbginput") {
+        logger_.filter_module("rustyline", LevelFilter::Warn);
+    }
+    if !matches.get_flag("debug") {
+        logger_.filter_module("mio", LevelFilter::Warn);
+    }
+    logger_.init();
+
     let (sender, input_receiver) = mpsc::channel(4096);
 
     let input_handler = InputThread::start(sender);
@@ -159,9 +172,12 @@ fn main() -> anyhow::Result<()> {
         .build()
         .unwrap()
         .block_on(staff(
-            matches
-                .get_one::<String>("API_KEY")
-                .expect("Need api key to work"),
+            std::env::var(DEFAULT_VARIABLE_NAME).unwrap_or_else(|_| {
+                matches
+                    .get_one::<String>("API_KEY")
+                    .expect("Need api key to work")
+                    .to_string()
+            }),
             matches
                 .get_one("server")
                 .map(|s: &String| s.to_string())

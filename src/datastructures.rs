@@ -86,7 +86,7 @@ pub mod socket {
         }
 
         pub(crate) async fn keep_alive(&mut self, payload: Option<&str>) -> anyhow::Result<()> {
-            self.write_data(payload.unwrap_or("whoami")).await
+            self.write_data(payload.unwrap_or("whoami\n\r")).await
         }
 
         async fn basic_operation(&mut self, payload: &str) -> QueryResult<()> {

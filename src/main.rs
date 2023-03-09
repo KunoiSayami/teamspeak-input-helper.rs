@@ -20,7 +20,7 @@ async fn real_staff(
     mut conn: SocketConn,
     alt_signal: Arc<AtomicBool>,
     mut input_receiver: mpsc::Receiver<DataType>,
-    mut writer: SharedWriter,
+    _writer: SharedWriter,
 ) -> anyhow::Result<()> {
     let mut received = true;
 

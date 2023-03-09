@@ -146,7 +146,7 @@ async fn staff(
 fn main() -> anyhow::Result<()> {
     let matches = command!()
         .args(&[
-            arg!(<API_KEY> "Teamspeak client query api key (env: TS_CLIENT_QUERY_APIKEY)"),
+            arg!([API_KEY] "Teamspeak client query api key (env: TS_CLIENT_QUERY_APIKEY)"),
             arg!(--server <SERVER> "Specify server"),
             arg!(--port <PORT> "Specify port"),
             arg!(--dbginput "Debug input function"),
@@ -173,10 +173,14 @@ fn main() -> anyhow::Result<()> {
         .unwrap()
         .block_on(staff(
             std::env::var(DEFAULT_VARIABLE_NAME).unwrap_or_else(|_| {
-                matches
-                    .get_one::<String>("API_KEY")
-                    .expect("Need api key to work")
-                    .to_string()
+                if let Some(key) = option_env!("BUILTIN_TS_API_KEY") {
+                    key.to_string()
+                } else {
+                    matches
+                        .get_one::<String>("API_KEY")
+                        .expect("Need api key to work")
+                        .to_string()
+                }
             }),
             matches
                 .get_one("server")

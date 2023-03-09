@@ -1,6 +1,6 @@
 # Telegram Input Helper
 
-This program will help you input non-ascii (like use input method) in teamspeak desktop version.
+This program will help you input non-ascii character (like use input method) in teamspeak desktop version.
 
 ## License
 

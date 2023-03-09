@@ -1,7 +1,7 @@
 mod inner {
     use anyhow::anyhow;
     use log::trace;
-    use tokio::io::{stdin, AsyncBufReadExt, BufReader};
+    use rustyline_async::{Readline, ReadlineError};
     use tokio::sync::mpsc;
 
     #[derive(Clone, Debug)]
@@ -10,25 +10,30 @@ mod inner {
         Terminate,
     }
 
-    pub async fn get_input(sender: mpsc::Sender<DataType>) -> anyhow::Result<()> {
-        let mut reader = BufReader::new(stdin());
-        let mut s = String::new();
-
+    pub async fn get_input(
+        mut reader: Readline,
+        sender: mpsc::Sender<DataType>,
+    ) -> anyhow::Result<()> {
         loop {
-            let size = reader
-                .read_line(&mut s)
-                .await
-                .map_err(|e| anyhow!("Got error while read from stdin: {:?}", e))?;
-            if size == 0 {
-                continue;
+            match reader.readline().await {
+                Ok(line) => {
+                    if line.is_empty() {
+                        continue;
+                    }
+                    sender
+                        .send(DataType::Data(line.trim().to_string()))
+                        .await
+                        .map_err(|_| anyhow!("Unable to send text"))
+                        .ok();
+                    trace!("Read {} bytes from stdin", line.len());
+                }
+                Err(ReadlineError::Interrupted) => {
+                    sender.send(DataType::Terminate).await.ok();
+                    ()
+                }
+                Err(ReadlineError::Eof) => {}
+                Err(e) => return Err(anyhow!("Got error while read line: {:?}", e)),
             }
-            sender
-                .send(DataType::Data(s.trim().to_string()))
-                .await
-                .map_err(|_| anyhow!("Unable to send text"))
-                .ok();
-            s.clear();
-            trace!("Read {} bytes from stdin", size);
         }
     }
 }

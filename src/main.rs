@@ -5,7 +5,9 @@ use crate::input_thread::{get_input, DataType};
 use anyhow::anyhow;
 use clap::{arg, command};
 use log::{error, info};
+use rustyline_async::SharedWriter;
 use std::hint::unreachable_unchecked;
+//use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -18,6 +20,7 @@ async fn real_staff(
     mut conn: SocketConn,
     alt_signal: Arc<AtomicBool>,
     mut input_receiver: mpsc::Receiver<DataType>,
+    mut writer: SharedWriter,
 ) -> anyhow::Result<()> {
     let mut received = true;
 
@@ -27,6 +30,11 @@ async fn real_staff(
         {
             match data {
                 DataType::Data(s) => {
+                    /*println!(
+                        "[{}] /me: {}",
+                        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                        &s
+                    );*/
                     conn.send_channel_message(&s)
                         .await
                         .map_err(|e| error!("Unable send channel message: {:?}", e))
@@ -63,7 +71,7 @@ async fn real_staff(
             continue;
         }
         let data = data.unwrap();
-        let current_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
         //trace!("message loop start");
         for line in data.lines().map(|line| line.trim()) {
             if line.is_empty() {
@@ -71,8 +79,15 @@ async fn real_staff(
             }
 
             if line.contains("notifytextmessage") {
+                let current_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
                 let view = NotifyTextMessage::from_query(line)
                     .map_err(|e| anyhow!("Got error while deserialize moved view: {:?}", e))?;
+
+                /*writer
+                .write_all(
+                    .as_bytes(),
+                )
+                .map_err(|e| anyhow!("Unable write to console: {:?}", e))?;*/
 
                 println!(
                     "[{time}] {sender}: {msg}",
@@ -97,17 +112,17 @@ async fn staff(api_key: &str, server: String, port: u16) -> anyhow::Result<()> {
     conn.login(api_key).await?;
     conn.register_event().await?;
 
+    let (readline, shared_writer) = rustyline_async::Readline::new(">> ".to_string())
+        .map_err(|e| anyhow!("Unable to create readline {:?}", e))?;
+
     let keepalive_signal = Arc::new(AtomicBool::new(false));
     let alt_signal = keepalive_signal.clone();
     let (sender, input_receiver) = mpsc::channel(4096);
     tokio::select! {
-        ret = get_input(sender.clone()) =>{
+        ret = get_input(readline, sender.clone()) =>{
             ret?;
         }
         _ = async move {
-            tokio::signal::ctrl_c().await.unwrap();
-            sender.send(DataType::Terminate).await.unwrap();
-            info!("Recv SIGINT signal, send exit signal");
             tokio::signal::ctrl_c().await.unwrap();
             info!("Recv SIGINT again, force exit.");
             std::process::exit(137);
@@ -120,7 +135,7 @@ async fn staff(api_key: &str, server: String, port: u16) -> anyhow::Result<()> {
                 keepalive_signal.store(true, Ordering::Relaxed);
             }
         } => {}
-        ret = real_staff(conn, alt_signal, input_receiver) => {
+        ret = real_staff(conn, alt_signal, input_receiver, shared_writer) => {
             ret?;
             // We really need this?
             std::process::exit(0);

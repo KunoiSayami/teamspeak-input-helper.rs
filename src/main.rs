@@ -1,13 +1,11 @@
-#![feature(is_some_and)]
+#![feature(is_some_and, result_flattening)]
 
 use crate::datastructures::{FromQueryString, NotifyTextMessage, SocketConn};
-use crate::input_thread::{get_input, DataType};
+use crate::input_thread::{DataType, InputThread};
 use anyhow::anyhow;
 use clap::{arg, command};
-use log::{error, info};
-use rustyline_async::SharedWriter;
+use log::{error, info, warn};
 use std::hint::unreachable_unchecked;
-//use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -20,7 +18,6 @@ async fn real_staff(
     mut conn: SocketConn,
     alt_signal: Arc<AtomicBool>,
     mut input_receiver: mpsc::Receiver<DataType>,
-    _writer: SharedWriter,
 ) -> anyhow::Result<()> {
     let mut received = true;
 
@@ -105,23 +102,21 @@ async fn real_staff(
     }
 }
 
-async fn staff(api_key: &str, server: String, port: u16) -> anyhow::Result<()> {
+async fn staff(
+    api_key: &str,
+    server: String,
+    port: u16,
+    input_receiver: mpsc::Receiver<DataType>,
+) -> anyhow::Result<()> {
     let mut conn = SocketConn::connect(&server, port)
         .await
         .map_err(|e| anyhow!("Connect error: {:?}", e))?;
     conn.login(api_key).await?;
     conn.register_event().await?;
 
-    let (readline, shared_writer) = rustyline_async::Readline::new(">> ".to_string())
-        .map_err(|e| anyhow!("Unable to create readline {:?}", e))?;
-
     let keepalive_signal = Arc::new(AtomicBool::new(false));
     let alt_signal = keepalive_signal.clone();
-    let (sender, input_receiver) = mpsc::channel(4096);
     tokio::select! {
-        ret = get_input(readline, sender.clone()) =>{
-            ret?;
-        }
         _ = async move {
             tokio::signal::ctrl_c().await.unwrap();
             info!("Recv SIGINT again, force exit.");
@@ -135,7 +130,7 @@ async fn staff(api_key: &str, server: String, port: u16) -> anyhow::Result<()> {
                 keepalive_signal.store(true, Ordering::Relaxed);
             }
         } => {}
-        ret = real_staff(conn, alt_signal, input_receiver, shared_writer) => {
+        ret = real_staff(conn, alt_signal, input_receiver) => {
             ret?;
             // We really need this?
             std::process::exit(0);
@@ -155,13 +150,18 @@ fn main() -> anyhow::Result<()> {
         .get_matches();
 
     env_logger::Builder::from_default_env().init();
+    let (sender, input_receiver) = mpsc::channel(4096);
+
+    let input_handler = InputThread::start(sender);
 
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
         .block_on(staff(
-            matches.get_one::<String>("API_KEY").unwrap(),
+            matches
+                .get_one::<String>("API_KEY")
+                .expect("Need api key to work"),
             matches
                 .get_one("server")
                 .map(|s: &String| s.to_string())
@@ -175,7 +175,14 @@ fn main() -> anyhow::Result<()> {
                         .ok()
                 })
                 .unwrap_or(25639),
+            input_receiver,
         ))?;
+
+    if input_handler.alive() {
+        warn!("Input thread still alive!");
+    } else {
+        input_handler.join()?;
+    }
 
     Ok(())
 }

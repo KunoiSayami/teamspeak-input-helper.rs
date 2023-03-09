@@ -1,6 +1,6 @@
 [package]
 name = "teamspeak-input-helper"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
@@ -9,7 +9,7 @@ chrono = "0.4.23"
 clap = { version = "4.1.8", features = ["cargo"] }
 env_logger = "0.10.0"
 log = { version = "0.4", features = ["max_level_trace", "release_max_level_debug"] }
-rustyline-async = "0.3.1"
+rustyline = "11.0.0"
 serde = "1.0"
 serde-teamspeak-querystring = { path = "serde-teamspeak-querystring" }
 serde_derive = "1.0"

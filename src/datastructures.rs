@@ -2,7 +2,7 @@ pub mod socket {
     use super::{FromQueryString, QueryResult, QueryStatus};
     use crate::datastructures::{NotifyTextMessage, QueryError};
     use anyhow::anyhow;
-    use log::{error, warn};
+    use log::{error, trace, warn};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -13,7 +13,6 @@ pub mod socket {
         conn: TcpStream,
     }
 
-    #[allow(dead_code)]
     impl SocketConn {
         fn decode_status(content: String) -> QueryResult<String> {
             for line in content.lines() {
@@ -24,23 +23,6 @@ pub mod socket {
                 }
             }
             Err(QueryError::static_empty_response())
-        }
-
-        fn decode_status_with_result<T: FromQueryString + Sized>(
-            data: String,
-        ) -> QueryResult<Option<Vec<T>>> {
-            let content = Self::decode_status(data)?;
-
-            for line in content.lines() {
-                if !line.starts_with("error ") {
-                    let mut v = Vec::new();
-                    for element in line.split('|') {
-                        v.push(T::from_query(element)?);
-                    }
-                    return Ok(Some(v));
-                }
-            }
-            Ok(None)
         }
 
         pub async fn read_data(&mut self) -> anyhow::Result<Option<String>> {
@@ -63,11 +45,13 @@ pub mod socket {
                     break;
                 }
             }
+            trace!("receive => {:?}", &ret);
             Ok(Some(ret))
         }
 
         async fn write_data(&mut self, payload: &str) -> anyhow::Result<()> {
             debug_assert!(payload.ends_with("\n\r"));
+            trace!("send => {:?}", payload);
             self.conn
                 .write(payload.as_bytes())
                 .await
@@ -85,8 +69,8 @@ pub mod socket {
             Ok(())
         }
 
-        pub(crate) async fn keep_alive(&mut self, payload: Option<&str>) -> anyhow::Result<()> {
-            self.write_data(payload.unwrap_or("whoami\n\r")).await
+        pub(crate) async fn keep_alive(&mut self) -> anyhow::Result<()> {
+            self.write_data("currentschandlerid\n\r").await
         }
 
         async fn basic_operation(&mut self, payload: &str) -> QueryResult<()> {
@@ -99,35 +83,6 @@ pub mod socket {
             self.read_data()
                 .await?
                 .ok_or_else(|| anyhow!("Return data is None"))
-        }
-
-        async fn query_operation_non_error<T: FromQueryString + Sized>(
-            &mut self,
-            payload: &str,
-        ) -> QueryResult<Vec<T>> {
-            let data = self.write_and_read(payload).await?;
-            let ret = Self::decode_status_with_result(data)?;
-            Ok(ret
-                .ok_or_else(|| panic!("Can't find result line, payload => {}", payload))
-                .unwrap())
-        }
-
-        async fn query_operation<T: FromQueryString + Sized>(
-            &mut self,
-            payload: &str,
-        ) -> QueryResult<Option<Vec<T>>> {
-            let data = self.write_and_read(payload).await?;
-            Self::decode_status_with_result(data)
-            //let status = status.ok_or_else(|| anyhow!("Can't find status line."))?;
-        }
-
-        async fn query_one<T: FromQueryString + Sized>(
-            &mut self,
-            payload: &str,
-        ) -> QueryResult<Option<T>> {
-            self.query_operation(payload)
-                .await
-                .map(|r| r.map(|mut t| t.swap_remove(0)))
         }
 
         pub async fn connect(server: &str, port: u16) -> anyhow::Result<Self> {
@@ -190,6 +145,7 @@ pub mod socket {
             Ok(())
         }
 
+        #[allow(dead_code)]
         pub async fn send_private_message(
             &mut self,
             client_id: i64,
@@ -228,26 +184,6 @@ impl FromQueryString for () {
     }
 }
 
-/*mod schandler_id {
-
-    use crate::datastructures::FromQueryString;
-    use serde_derive::Deserialize;
-
-    #[derive(Copy, Clone, Debug, Deserialize)]
-    pub struct SchandlerId {
-        #[serde(rename = "schandlerid")]
-        schandler_id: i64,
-    }
-
-    impl SchandlerId {
-        pub fn schandler_id(&self) -> i64 {
-            self.schandler_id
-        }
-    }
-
-    impl FromQueryString for SchandlerId {}
-}*/
-
 mod notifies {
     use crate::datastructures::FromQueryString;
     use serde_derive::Deserialize;
@@ -257,7 +193,6 @@ mod notifies {
         /*#[serde(rename = "targetmode", default)]
         target_mode: i8,*/
         msg: String,
-        //target: i64,
         /*#[serde(rename = "invokerid", default)]
         invoker_id: i64,*/
         #[serde(rename = "invokername", default)]
@@ -267,24 +202,12 @@ mod notifies {
     }
 
     impl NotifyTextMessage {
-        /*pub fn target_mode(&self) -> i8 {
-            self.target_mode
-        }*/
         pub fn msg(&self) -> &str {
             &self.msg
         }
-        /*pub fn target(&self) -> i64 {
-            self.target
-        }*/
         pub fn invoker_name(&self) -> &str {
             &self.invoker_name
         }
-        /*pub fn invoker_uid(&self) -> &str {
-            &self.invoker_uid
-        }*/
-        /*pub fn invoker_id(&self) -> i64 {
-            self.invoker_id
-        }*/
     }
 
     impl FromQueryString for NotifyTextMessage {}

@@ -4,7 +4,7 @@ use crate::datastructures::{FromQueryString, NotifyTextMessage, SocketConn};
 use crate::input_thread::{get_input, DataType};
 use anyhow::anyhow;
 use clap::{arg, command};
-use log::{error, info, trace};
+use log::{error, info};
 use std::hint::unreachable_unchecked;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -22,17 +22,6 @@ async fn real_staff(
     let mut received = true;
 
     loop {
-        /*if recv
-            .has_changed()
-            .map_err(|e| anyhow!("Got error in check watcher {:?}", e))?
-        {
-            info!("Exit from staff thread!");
-            conn.logout().await.ok();
-            break;
-        }*/
-
-        //trace!("Read data");
-
         if let Ok(Some(data)) =
             tokio::time::timeout(Duration::from_secs(1), input_receiver.recv()).await
         {
@@ -63,7 +52,7 @@ async fn real_staff(
                     return Err(anyhow!("Server disconnected"));
                 }
                 received = false;
-                conn.keep_alive(None)
+                conn.keep_alive()
                     .await
                     .map_err(|e| {
                         error!("Got error while write data in keep alive function: {:?}", e)
@@ -80,7 +69,6 @@ async fn real_staff(
             if line.is_empty() {
                 continue;
             }
-            trace!("{}", line);
 
             if line.contains("notifytextmessage") {
                 let view = NotifyTextMessage::from_query(line)
@@ -95,11 +83,10 @@ async fn real_staff(
                 continue;
             }
 
-            if line.contains("virtualserver_status=") {
+            if line.contains("schandlerid=") {
                 received = true;
             }
         }
-        //trace!("message loop end");
     }
 }
 

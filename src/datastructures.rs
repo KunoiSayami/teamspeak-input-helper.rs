@@ -17,6 +17,15 @@ impl FromQueryString for () {
     }
 }
 
+impl FromQueryString for String {
+    fn from_query(data: &str) -> anyhow::Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(data.to_string())
+    }
+}
+
 mod schandler_id {
     use crate::datastructures::FromQueryString;
     use serde_derive::Deserialize;
@@ -199,8 +208,18 @@ mod query_result {
     }
 }
 
+mod transmission_command {
+    #[derive(Clone, Debug)]
+    pub enum TransmissionCommand {
+        Data(String),
+        KeepAlive,
+        Terminate,
+    }
+}
+
 pub use notifies::NotifyTextMessage;
 pub use query_result::{QueryError, QueryResult};
 pub use query_status::QueryStatus;
 pub use schandler_id::SchandlerId;
 use serde::Deserialize;
+pub use transmission_command::TransmissionCommand;

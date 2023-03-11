@@ -1,13 +1,14 @@
 #![feature(is_some_and, result_flattening)]
 
-use crate::datastructures::{FromQueryString, NotifyTextMessage};
-use crate::input_thread::{DataType, InputThread};
+use crate::datastructures::{FromQueryString, NotifyTextMessage, TransmissionCommand};
+use crate::input_thread::InputThread;
 use crate::tslib::TeamspeakConnection;
 use anyhow::anyhow;
 use clap::{arg, command};
+use kstool::prelude::get_current_duration;
 use log::{error, info, warn, LevelFilter};
 use std::hint::unreachable_unchecked;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
@@ -17,20 +18,19 @@ mod input_thread;
 mod tslib;
 
 const DEFAULT_VARIABLE_NAME: &str = "TS_CLIENT_QUERY_APIKEY";
+const TRANSMISSION_DEADLINE: u64 = 180;
 
 async fn real_staff(
     mut conn: TeamspeakConnection,
-    alt_signal: Arc<AtomicBool>,
-    mut input_receiver: mpsc::Receiver<DataType>,
+    last_transmission: Arc<AtomicU64>,
+    mut command_receiver: mpsc::Receiver<TransmissionCommand>,
 ) -> anyhow::Result<()> {
-    let mut received = true;
-
     loop {
         if let Ok(Some(data)) =
-            tokio::time::timeout(Duration::from_secs(1), input_receiver.recv()).await
+            tokio::time::timeout(Duration::from_millis(100), command_receiver.recv()).await
         {
             match data {
-                DataType::Data(s) => {
+                TransmissionCommand::Data(s) => {
                     let server_id = conn
                         .get_current_server_tab()
                         .await
@@ -42,8 +42,18 @@ async fn real_staff(
                         .await
                         .map_err(|e| error!("Unable send channel message: {:?}", e))
                         .ok();
+                    last_transmission.store(get_current_duration().as_secs(), Ordering::Relaxed);
                 }
-                DataType::Terminate => {
+                TransmissionCommand::KeepAlive => {
+                    conn.keep_alive()
+                        .await
+                        .map_err(|e| {
+                            error!("Got error while write data in keep alive function: {:?}", e)
+                        })
+                        .ok();
+                    last_transmission.store(get_current_duration().as_secs(), Ordering::Relaxed);
+                }
+                TransmissionCommand::Terminate => {
                     return Ok(());
                 }
             }
@@ -56,21 +66,6 @@ async fn real_staff(
         //trace!("Read data end");
 
         if !data.as_ref().is_some_and(|x| !x.is_empty()) {
-            let signal = alt_signal.load(Ordering::Relaxed);
-            if signal {
-                if !received {
-                    error!("Not received answer after period of time");
-                    return Err(anyhow!("Server disconnected"));
-                }
-                received = false;
-                conn.keep_alive()
-                    .await
-                    .map_err(|e| {
-                        error!("Got error while write data in keep alive function: {:?}", e)
-                    })
-                    .ok();
-                alt_signal.store(false, Ordering::Relaxed);
-            }
             continue;
         }
         let data = data.unwrap();
@@ -93,10 +88,6 @@ async fn real_staff(
                 );
                 continue;
             }
-
-            if line.contains("clid=") && line.contains("cid=") {
-                received = true;
-            }
         }
     }
 }
@@ -105,7 +96,8 @@ async fn staff(
     api_key: &str,
     server: String,
     port: u16,
-    input_receiver: mpsc::Receiver<DataType>,
+    command_sender: mpsc::Sender<TransmissionCommand>,
+    command_receiver: mpsc::Receiver<TransmissionCommand>,
 ) -> anyhow::Result<()> {
     let mut conn = TeamspeakConnection::connect(&server, port)
         .await
@@ -113,8 +105,7 @@ async fn staff(
     conn.login(api_key).await?;
     conn.register_event().await?;
 
-    let keepalive_signal = Arc::new(AtomicBool::new(false));
-    let alt_signal = keepalive_signal.clone();
+    let last_transmission = Arc::new(AtomicU64::new(get_current_duration().as_secs()));
     tokio::select! {
         _ = async move {
             tokio::signal::ctrl_c().await.unwrap();
@@ -123,15 +114,17 @@ async fn staff(
         } => {
             unsafe { unreachable_unchecked() }
         }
-        _ = async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(30)).await;
-                keepalive_signal.store(true, Ordering::Relaxed);
-            }
-        } => {}
-        ret = real_staff(conn, alt_signal, input_receiver) => {
+        ret = real_staff(conn, last_transmission.clone(), command_receiver) => {
             ret?;
         }
+        _ = async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                if get_current_duration().as_secs() - last_transmission.load(Ordering::Relaxed) > TRANSMISSION_DEADLINE {
+                    command_sender.send(TransmissionCommand::KeepAlive).await.map_err(|_| error!("Unable send keep alive command")).ok();
+                }
+            }
+        } => {}
     }
 
     Ok(())
@@ -157,9 +150,9 @@ fn main() -> anyhow::Result<()> {
     }
     logger_.init();
 
-    let (sender, input_receiver) = mpsc::channel(4096);
+    let (sender, command_receiver) = mpsc::channel(4096);
 
-    let input_handler = InputThread::start(sender);
+    let input_handler = InputThread::start(sender.clone());
 
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -180,7 +173,8 @@ fn main() -> anyhow::Result<()> {
                         .ok()
                 })
                 .unwrap_or(25639),
-            input_receiver,
+            sender,
+            command_receiver,
         ))?;
 
     if input_handler.alive() {

@@ -1,4 +1,5 @@
 mod inner {
+    use crate::datastructures::TransmissionCommand;
     use anyhow::anyhow;
     use log::{error, trace};
     use rustyline::error::ReadlineError;
@@ -8,19 +9,16 @@ mod inner {
     use tokio::sync::mpsc;
     use tokio::time::Instant;
 
-    #[derive(Clone, Debug)]
-    pub enum DataType {
-        Data(String),
-        Terminate,
-    }
-
     #[derive(Debug)]
     pub struct InputThread {
         handle: JoinHandle<anyhow::Result<()>>,
     }
 
     impl InputThread {
-        fn send_data(sender: mpsc::Sender<DataType>, data: DataType) -> Option<()> {
+        fn send_data(
+            sender: mpsc::Sender<TransmissionCommand>,
+            data: TransmissionCommand,
+        ) -> Option<()> {
             let start = Instant::now();
             let ret = tokio::runtime::Builder::new_current_thread()
                 .build()
@@ -33,7 +31,7 @@ mod inner {
         }
 
         // Known issue, may override C-c function after program exit
-        pub fn get_input(sender: mpsc::Sender<DataType>) -> anyhow::Result<()> {
+        pub fn get_input(sender: mpsc::Sender<TransmissionCommand>) -> anyhow::Result<()> {
             let tmp_file = NamedTempFile::new()
                 .map_err(|e| error!("[Can be safety ignore] Unable create temp file: {:?}", e))
                 .ok();
@@ -56,11 +54,14 @@ mod inner {
                         if success {
                             rl.add_history_entry(line.trim()).ok();
                         }
-                        Self::send_data(sender.clone(), DataType::Data(line.trim().to_string()));
+                        Self::send_data(
+                            sender.clone(),
+                            TransmissionCommand::Data(line.trim().to_string()),
+                        );
                         trace!("Read {} bytes from stdin", line.len());
                     }
                     Err(ReadlineError::Interrupted | ReadlineError::Eof) => {
-                        Self::send_data(sender, DataType::Terminate);
+                        Self::send_data(sender, TransmissionCommand::Terminate);
                         trace!("Send exit signal");
                         break;
                     }
@@ -71,7 +72,7 @@ mod inner {
             Ok(())
         }
 
-        pub fn start(sender: mpsc::Sender<DataType>) -> Self {
+        pub fn start(sender: mpsc::Sender<TransmissionCommand>) -> Self {
             Self {
                 handle: std::thread::spawn(|| Self::get_input(sender)),
             }
@@ -90,4 +91,4 @@ mod inner {
     }
 }
 
-pub use inner::{DataType, InputThread};
+pub use inner::InputThread;

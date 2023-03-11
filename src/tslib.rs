@@ -26,6 +26,41 @@ mod ts_socket {
             Err(QueryError::static_empty_response())
         }
 
+        /*        pub async fn read_data_long(&mut self) -> anyhow::Result<Option<String>> {
+            let mut buffer = [0u8; BUFFER_SIZE];
+            let mut ret = String::new();
+
+            let mut wait = Duration::from_millis(400);
+
+            let mut loop_timer = 5;
+
+            loop {
+                let size = if let Ok(data) =
+                    tokio::time::timeout(wait, self.conn.read(&mut buffer)).await
+                {
+                    match data {
+                        Ok(size) => {
+                            wait = Duration::from_millis(100);
+                            ret.push_str(&dbg!(String::from_utf8_lossy(&buffer[..size])));
+                            size
+                        }
+                        Err(e) => return Err(anyhow!("Got error while read data: {:?}", e)),
+                    }
+                } else {
+                    0
+                };
+                loop_timer -= 1;
+
+                if (loop_timer == 0 && size < BUFFER_SIZE)
+                    || dbg!(ret.contains("error id=") && ret.ends_with("\n\r"))
+                {
+                    break;
+                }
+            }
+            trace!("receive => {:?}", &ret);
+            Ok(Some(ret))
+        }*/
+
         pub async fn read_data(&mut self) -> anyhow::Result<Option<String>> {
             let mut buffer = [0u8; BUFFER_SIZE];
             let mut ret = String::new();
@@ -70,8 +105,9 @@ mod ts_socket {
             Ok(())
         }
 
-        pub async fn keep_alive(&mut self) -> anyhow::Result<()> {
-            self.write_data("whoami\n\r").await
+        pub async fn keep_alive(&mut self) -> QueryResult<bool> {
+            let line = self.query_one_non_error::<String>("whoami\n\r").await?;
+            Ok(line.contains("clid=") && line.contains("cid="))
         }
 
         async fn basic_operation(&mut self, payload: &str) -> QueryResult<()> {
@@ -131,16 +167,24 @@ mod ts_socket {
                 client_id = client_id,
                 text = Self::escape(text)
             );
-            let data = self.write_and_read(&payload).await?;
+            let data = self.write_and_read(&payload).await.map(|s| {
+                if s.contains("\n\r") {
+                    s.split_once("\n\r").unwrap().0.to_string()
+                } else {
+                    s
+                }
+            })?;
             if data.starts_with("notifytextmessage") {
                 let (_, data) = data
                     .split_once("notifytextmessage ")
                     .ok_or_else(|| QueryError::send_message_error(data.clone()))?;
                 let r = NotifyTextMessage::from_query(data)
                     .map_err(|_| QueryError::decode_error(data))?;
-                //debug!("{:?} {:?}", r.msg(), text);
+                //trace!("{:?} {:?}", r.msg(), text);
                 if !r.msg().eq(text) {
-                    return Err(QueryError::send_message_error("None".to_string()));
+                    return Err(QueryError::send_message_error(
+                        "None (No equal)".to_string(),
+                    ));
                 }
             } else {
                 return Self::decode_status(data).map(|_| ());

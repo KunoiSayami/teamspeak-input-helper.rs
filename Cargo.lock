@@ -365,6 +365,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "kstool"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5c5e67c985ad078333c68f9e7b9e6355493abab7aa5ceafb8925eaf56cd341c"
+
+[[package]]
 name = "lexical"
 version = "6.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -798,12 +804,13 @@ dependencies = [
 
 [[package]]
 name = "teamspeak-input-helper"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
  "env_logger",
+ "kstool",
  "log",
  "rustyline",
  "serde",

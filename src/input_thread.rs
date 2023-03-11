@@ -4,7 +4,9 @@ mod inner {
     use rustyline::error::ReadlineError;
     use rustyline::DefaultEditor;
     use std::thread::JoinHandle;
+    use tempfile::NamedTempFile;
     use tokio::sync::mpsc;
+    use tokio::time::Instant;
 
     #[derive(Clone, Debug)]
     pub enum DataType {
@@ -19,23 +21,40 @@ mod inner {
 
     impl InputThread {
         fn send_data(sender: mpsc::Sender<DataType>, data: DataType) -> Option<()> {
-            tokio::runtime::Builder::new_current_thread()
+            let start = Instant::now();
+            let ret = tokio::runtime::Builder::new_current_thread()
                 .build()
                 .unwrap()
                 .block_on(sender.send(data))
                 .map_err(|_| error!("Unable to send text"))
-                .ok()
+                .ok();
+            trace!("Measure end => {:?}", start.elapsed());
+            ret
         }
 
         // Known issue, may override C-c function after program exit
         pub fn get_input(sender: mpsc::Sender<DataType>) -> anyhow::Result<()> {
+            let tmp_file = NamedTempFile::new()
+                .map_err(|e| error!("[Can be safety ignore] Unable create temp file: {:?}", e))
+                .ok();
             let mut rl = DefaultEditor::new()?;
+
+            let mut success = false;
+            if let Some(file) = tmp_file {
+                rl.load_history(file.path())
+                    .map(|_| success = true)
+                    .map_err(|e| error!("[Can be safety ignore] Unable load file history. {:?}", e))
+                    .ok();
+            }
 
             loop {
                 match rl.readline(">> ") {
                     Ok(line) => {
                         if line.is_empty() {
                             continue;
+                        }
+                        if success {
+                            rl.add_history_entry(line.trim()).ok();
                         }
                         Self::send_data(sender.clone(), DataType::Data(line.trim().to_string()));
                         trace!("Read {} bytes from stdin", line.len());

@@ -31,12 +31,6 @@ async fn real_staff(
         {
             match data {
                 DataType::Data(s) => {
-                    /*println!(
-                        "[{}] /me: {}",
-                        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                        &s
-                    );*/
-
                     let server_id = conn
                         .get_current_server_tab()
                         .await
@@ -108,7 +102,7 @@ async fn real_staff(
 }
 
 async fn staff(
-    api_key: String,
+    api_key: &str,
     server: String,
     port: u16,
     input_receiver: mpsc::Receiver<DataType>,
@@ -116,7 +110,7 @@ async fn staff(
     let mut conn = TeamspeakConnection::connect(&server, port)
         .await
         .map_err(|e| anyhow!("Connect error: {:?}", e))?;
-    conn.login(&api_key).await?;
+    conn.login(api_key).await?;
     conn.register_event().await?;
 
     let keepalive_signal = Arc::new(AtomicBool::new(false));
@@ -146,7 +140,7 @@ async fn staff(
 fn main() -> anyhow::Result<()> {
     let matches = command!()
         .args(&[
-            arg!([API_KEY] "Teamspeak client query api key (env: TS_CLIENT_QUERY_APIKEY)"),
+            arg!(<API_KEY> "Teamspeak client query api key").env(DEFAULT_VARIABLE_NAME),
             arg!(--server <SERVER> "Specify server"),
             arg!(--port <PORT> "Specify port"),
             arg!(--dbginput "Debug input function"),
@@ -172,16 +166,7 @@ fn main() -> anyhow::Result<()> {
         .build()
         .unwrap()
         .block_on(staff(
-            std::env::var(DEFAULT_VARIABLE_NAME).unwrap_or_else(|_| {
-                if let Some(key) = option_env!("BUILTIN_TS_API_KEY") {
-                    key.to_string()
-                } else {
-                    matches
-                        .get_one::<String>("API_KEY")
-                        .expect("Need api key to work")
-                        .to_string()
-                }
-            }),
+            matches.get_one::<String>("API_KEY").unwrap(),
             matches
                 .get_one("server")
                 .map(|s: &String| s.to_string())

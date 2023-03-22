@@ -1,4 +1,4 @@
-# Telegram Input Helper
+# Teamspeak Input Helper
 
 This program will help you input non-ascii character (like use input method) in teamspeak desktop version.
 

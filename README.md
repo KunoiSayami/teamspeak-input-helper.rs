@@ -1,6 +1,6 @@
 # Teamspeak Input Helper
 
-This program will help you input non-ascii character (like use input method) in teamspeak desktop version.
+This program will help you input non-ascii characters (e.g. using input method editor) in Teamspeak Linux version.
 
 ## License
 

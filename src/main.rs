@@ -26,67 +26,72 @@ async fn real_staff(
     mut command_receiver: mpsc::Receiver<TransmissionCommand>,
 ) -> anyhow::Result<()> {
     loop {
-        if let Ok(Some(data)) =
-            tokio::time::timeout(Duration::from_millis(100), command_receiver.recv()).await
-        {
-            match data {
-                TransmissionCommand::Data(s) => {
-                    let server_id = conn
-                        .get_current_server_tab()
-                        .await
-                        .map_err(|e| warn!("Can't get current server tab: {:?}", e))
-                        .map(|r| r.schandler_id())
-                        .ok()
-                        .unwrap_or(1);
-                    conn.send_channel_message(server_id, &s)
-                        .await
-                        .map_err(|e| error!("Unable send channel message: {:?}", e))
-                        .ok();
-                    last_transmission.store(get_current_duration().as_secs(), Ordering::Relaxed);
-                }
-                TransmissionCommand::KeepAlive => {
-                    conn.keep_alive()
-                        .await
-                        .map_err(|e| {
-                            error!("Got error while write data in keep alive function: {:?}", e)
-                        })
-                        .ok();
-                    last_transmission.store(get_current_duration().as_secs(), Ordering::Relaxed);
-                }
-                TransmissionCommand::Terminate => {
-                    return Ok(());
+        tokio::select! {
+            Some(data) = command_receiver.recv() => {
+                match data {
+                    TransmissionCommand::Data(s) => {
+                        let server_id = conn
+                            .get_current_server_tab()
+                            .await
+                            .map_err(|e| warn!("Can't get current server tab: {:?}", e))
+                            .map(|r| r.schandler_id())
+                            .ok()
+                            .unwrap_or(1);
+                        conn.send_channel_message(server_id, &s)
+                            .await
+                            .map_err(|e| error!("Unable send channel message: {:?}", e))
+                            .ok();
+                        last_transmission.store(get_current_duration().as_secs(), Ordering::Relaxed);
+                    }
+                    TransmissionCommand::KeepAlive => {
+                        conn.keep_alive()
+                            .await
+                            .map_err(|e| {
+                                error!("Got error while write data in keep alive function: {:?}", e)
+                            })
+                            .ok();
+                        last_transmission.store(get_current_duration().as_secs(), Ordering::Relaxed);
+                    }
+                    TransmissionCommand::Terminate => {
+                        return Ok(());
+                    }
                 }
             }
-        }
+            ret = conn.wait_readable() => {
+                if !ret? {
+                    continue;
+                }
 
-        let data = conn
-            .read_data()
-            .await
-            .map_err(|e| anyhow!("Got error while read data: {:?}", e))?;
-        //trace!("Read data end");
+                let data = conn
+                    .read_data()
+                    .await
+                    .map_err(|e| anyhow!("Got error while read data: {:?}", e))?;
+                //trace!("Read data end");
 
-        if !data.as_ref().is_some_and(|x| !x.is_empty()) {
-            continue;
-        }
-        let data = data.unwrap();
+                if !data.as_ref().is_some_and(|x| !x.is_empty()) {
+                    continue;
+                }
+                let data = data.unwrap();
 
-        //trace!("message loop start");
-        for line in data.lines().map(|line| line.trim()) {
-            if line.is_empty() {
-                continue;
-            }
+                //trace!("message loop start");
+                for line in data.lines().map(|line| line.trim()) {
+                    if line.is_empty() {
+                        continue;
+                    }
 
-            if line.contains("notifytextmessage") {
-                let view = NotifyTextMessage::from_query(line)
-                    .map_err(|e| anyhow!("Got error while deserialize moved view: {:?}", e))?;
+                    if line.contains("notifytextmessage") {
+                        let view = NotifyTextMessage::from_query(line)
+                            .map_err(|e| anyhow!("Got error while deserialize moved view: {:?}", e))?;
 
-                println!(
-                    "[{time}] {sender}: {msg}",
-                    time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                    sender = view.invoker_name(),
-                    msg = view.msg()
-                );
-                continue;
+                        println!(
+                            "[{time}] {sender}: {msg}",
+                            time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                            sender = view.invoker_name(),
+                            msg = view.msg()
+                        );
+                        continue;
+                    }
+                }
             }
         }
     }
@@ -119,7 +124,7 @@ async fn staff(
         }
         _ = async move {
             loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(Duration::from_secs(5)).await;
                 if get_current_duration().as_secs() - last_transmission.load(Ordering::Relaxed) > TRANSMISSION_DEADLINE {
                     command_sender.send(TransmissionCommand::KeepAlive).await.map_err(|_| error!("Unable send keep alive command")).ok();
                 }

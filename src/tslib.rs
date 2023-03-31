@@ -5,7 +5,7 @@ mod ts_socket {
     use anyhow::anyhow;
     use log::{error, trace, warn};
     use std::time::Duration;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt, Interest};
     use tokio::net::TcpStream;
 
     const BUFFER_SIZE: usize = 512;
@@ -26,40 +26,9 @@ mod ts_socket {
             Err(QueryError::static_empty_response())
         }
 
-        /*        pub async fn read_data_long(&mut self) -> anyhow::Result<Option<String>> {
-            let mut buffer = [0u8; BUFFER_SIZE];
-            let mut ret = String::new();
-
-            let mut wait = Duration::from_millis(400);
-
-            let mut loop_timer = 5;
-
-            loop {
-                let size = if let Ok(data) =
-                    tokio::time::timeout(wait, self.conn.read(&mut buffer)).await
-                {
-                    match data {
-                        Ok(size) => {
-                            wait = Duration::from_millis(100);
-                            ret.push_str(&dbg!(String::from_utf8_lossy(&buffer[..size])));
-                            size
-                        }
-                        Err(e) => return Err(anyhow!("Got error while read data: {:?}", e)),
-                    }
-                } else {
-                    0
-                };
-                loop_timer -= 1;
-
-                if (loop_timer == 0 && size < BUFFER_SIZE)
-                    || dbg!(ret.contains("error id=") && ret.ends_with("\n\r"))
-                {
-                    break;
-                }
-            }
-            trace!("receive => {:?}", &ret);
-            Ok(Some(ret))
-        }*/
+        pub async fn wait_readable(&mut self) -> anyhow::Result<bool> {
+            Ok(self.conn.ready(Interest::READABLE).await?.is_readable())
+        }
 
         pub async fn read_data(&mut self) -> anyhow::Result<Option<String>> {
             let mut buffer = [0u8; BUFFER_SIZE];

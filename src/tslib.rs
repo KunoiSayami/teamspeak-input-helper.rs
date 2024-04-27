@@ -26,6 +26,7 @@ mod ts_socket {
             Err(QueryError::static_empty_response())
         }
 
+        // credit by: Coelacanthus
         pub async fn wait_readable(&mut self) -> anyhow::Result<bool> {
             Ok(self.conn.ready(Interest::READABLE).await?.is_readable())
         }

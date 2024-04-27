@@ -1,4 +1,4 @@
-#![feature( result_flattening)]
+#![feature(result_flattening)]
 
 use crate::datastructures::{FromQueryString, NotifyTextMessage, TransmissionCommand};
 use crate::input_thread::InputThread;

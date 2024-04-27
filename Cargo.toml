@@ -12,7 +12,7 @@ kstool = "0.2.1"
 log = { version = "0.4", features = ["max_level_trace", "release_max_level_debug"] }
 rustyline = { version = "14.0.0", features = ["with-file-history"] }
 serde = "1.0"
-serde-teamspeak-querystring = "0.2.1"
+serde-teamspeak-querystring = "0.3.1"
 serde_derive = "1.0"
 serde_json = "1.0.79"
 tap = "1.0.1"

@@ -10,6 +10,7 @@ use log::{error, info, warn, LevelFilter};
 use std::hint::unreachable_unchecked;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tap::TapFallible;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 
@@ -33,20 +34,20 @@ async fn real_staff(
                         let server_id = conn
                             .get_current_server_tab()
                             .await
-                            .map_err(|e| warn!("Can't get current server tab: {:?}", e))
+                            .tap_err(|e| warn!("Can't get current server tab: {:?}", e))
                             .map(|r| r.schandler_id())
                             .ok()
                             .unwrap_or(1);
                         conn.send_channel_message(server_id, &s)
                             .await
-                            .map_err(|e| error!("Unable send channel message: {:?}", e))
+                            .tap_err(|e| error!("Unable send channel message: {:?}", e))
                             .ok();
                         last_transmission.store(get_current_duration().as_secs(), Ordering::Relaxed);
                     }
                     TransmissionCommand::KeepAlive => {
                         conn.keep_alive()
                             .await
-                            .map_err(|e| {
+                            .tap_err(|e| {
                                 error!("Got error while write data in keep alive function: {:?}", e)
                             })
                             .ok();
@@ -106,8 +107,10 @@ async fn staff(
 ) -> anyhow::Result<()> {
     let mut conn = TeamspeakConnection::connect(&server, port)
         .await
-        .map_err(|e| anyhow!("Connect error: {:?}", e))?;
-    conn.login(api_key).await?;
+        .map_err(|e| anyhow!("Connect teamspeak error: {:?}", e))?;
+    conn.login(api_key)
+        .await
+        .map_err(|e| anyhow!("Login failure, {:?}", e))?;
     conn.register_event().await?;
 
     let last_transmission = Arc::new(AtomicU64::new(get_current_duration().as_secs()));
@@ -126,7 +129,7 @@ async fn staff(
             loop {
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 if get_current_duration().as_secs() - last_transmission.load(Ordering::Relaxed) > TRANSMISSION_DEADLINE {
-                    command_sender.send(TransmissionCommand::KeepAlive).await.map_err(|_| error!("Unable send keep alive command")).ok();
+                    command_sender.send(TransmissionCommand::KeepAlive).await.tap_err(|_| error!("Unable send keep alive command")).ok();
                 }
             }
         } => {}
@@ -140,14 +143,14 @@ fn main() -> anyhow::Result<()> {
         .args(&[
             arg!(<API_KEY> "Teamspeak client query api key").env(DEFAULT_VARIABLE_NAME),
             arg!(--server <SERVER> "Specify server"),
-            arg!(--port <PORT> "Specify port"),
-            arg!(--dbginput "Debug input function"),
+            arg!(--port <PORT> "Specify port").value_parser(clap::value_parser!(u16)),
+            arg!(--"debug-input" "Debug input function"),
             arg!(--debug "Enable other module log output in debug/trace level"),
         ])
         .get_matches();
 
     let mut logger_ = env_logger::Builder::from_default_env();
-    if !matches.get_flag("dbginput") {
+    if !matches.get_flag("debug-input") {
         logger_.filter_module("rustyline", LevelFilter::Warn);
     }
     if !matches.get_flag("debug") {
@@ -169,15 +172,7 @@ fn main() -> anyhow::Result<()> {
                 .get_one("server")
                 .map(|s: &String| s.to_string())
                 .unwrap_or_else(|| "localhost".to_string()),
-            matches
-                .get_one("port")
-                .map(|s: &String| s.to_string())
-                .and_then(|s| {
-                    s.parse()
-                        .map_err(|e| error!("Got parse error, use default 25639 instead. {:?}", e))
-                        .ok()
-                })
-                .unwrap_or(25639),
+            *matches.get_one("port").unwrap_or(&25639),
             sender,
             command_receiver,
         ))?;

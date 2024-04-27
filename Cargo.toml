@@ -1,6 +1,6 @@
 [package]
 name = "teamspeak-input-helper"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 
 [dependencies]
@@ -15,5 +15,6 @@ serde = "1.0"
 serde-teamspeak-querystring = "0.2.1"
 serde_derive = "1.0"
 serde_json = "1.0.79"
+tap = "1.0.1"
 tempfile = "3.4.0"
 tokio = { version = "1", features = ["full"] }

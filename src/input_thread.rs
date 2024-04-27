@@ -5,9 +5,9 @@ mod inner {
     use rustyline::error::ReadlineError;
     use rustyline::DefaultEditor;
     use std::thread::JoinHandle;
+    use tap::TapFallible;
     use tempfile::NamedTempFile;
     use tokio::sync::mpsc;
-    use tokio::time::Instant;
 
     #[derive(Debug)]
     pub struct InputThread {
@@ -19,21 +19,17 @@ mod inner {
             sender: mpsc::Sender<TransmissionCommand>,
             data: TransmissionCommand,
         ) -> Option<()> {
-            let start = Instant::now();
-            let ret = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .unwrap()
-                .block_on(sender.send(data))
-                .map_err(|_| error!("Unable to send text"))
+            let ret = sender
+                .blocking_send(data)
+                .tap_err(|_| error!("Unable to send text"))
                 .ok();
-            trace!("Measure end => {:?}", start.elapsed());
             ret
         }
 
         // Known issue, may override C-c function after program exit
         pub fn get_input(sender: mpsc::Sender<TransmissionCommand>) -> anyhow::Result<()> {
             let tmp_file = NamedTempFile::new()
-                .map_err(|e| error!("[Can be safety ignore] Unable create temp file: {:?}", e))
+                .tap_err(|e| error!("[Can be safety ignore] Unable create temp file: {:?}", e))
                 .ok();
             let mut rl = DefaultEditor::new()?;
 
@@ -41,7 +37,7 @@ mod inner {
             if let Some(file) = tmp_file {
                 rl.load_history(file.path())
                     .map(|_| success = true)
-                    .map_err(|e| error!("[Can be safety ignore] Unable load file history. {:?}", e))
+                    .tap_err(|e| error!("[Can be safety ignore] Unable load file history. {:?}", e))
                     .ok();
             }
 
